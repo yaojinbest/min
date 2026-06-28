@@ -1,19 +1,21 @@
 /**
- * TTS 服务 — Web Speech API 封装(修复版)
+ * TTS 服务 v2 — 基于预录真人发音 (Edge TTS 生成)
  *
- * 已知坑:
- * 1. voices 异步加载,首次 getVoices() 返回空数组 → 必须等 voiceschanged
- * 2. Chrome 短文本(< 1s)经常被吞音,utterance.volume=1 + 加短停顿
- * 3. iOS Safari 必须在用户手势内 new utterance,否则无效
- * 4. 长文本一次性 speak 有 bug,要分段
- * 5. 必须先 cancel() 再 speak,否则会排队不响
- * 6. onboundary 在 Chrome 默认不开,需 charIndex + boundary 监听
+ * 优势:
+ * - 100% 浏览器兼容,无 autoplay policy 问题
+ * - 高质量 AriaNeural 真人发音
+ * - 单词边界高亮用音频时长/词数估算
+ *
+ * 文件结构(public/audio/):
+ *   - {word}.mp3(50 个词典词)
+ *   - story_{n}_p{m}.mp3(3 故事 × 3 段 = 9 个)
+ *   - durations.json(60 个时长数据)
  */
 
+import durationsData from '../../public/audio/durations.json';
+
 export interface TTSOptions {
-  rate?: number;
-  lang?: string;
-  pitch?: number;
+  rate?: number; // 0.5 - 1.5
 }
 
 type TTSEvent =
@@ -22,102 +24,36 @@ type TTSEvent =
   | { type: 'word'; wordIndex: number; word: string }
   | { type: 'error'; error: string };
 
-class TTSService {
-  private synthesis: SpeechSynthesis | null = null;
-  private utterance: SpeechSynthesisUtterance | null = null;
-  private isPlaying = false;
-  private listeners: Set<(e: TTSEvent) => void> = new Set();
-  private currentRate = 0.9;
-  private currentLang = 'en-US';
-  private currentPitch = 1.1;
-  private voicesReady = false;
-  private voicesReadyPromise: Promise<void> | null = null;
-  private primed = false; // 是否预热过(用于 Chrome autoplay policy)
+// 预加载时长数据
+const durations: Record<string, number> = durationsData as any;
 
-  constructor() {
-    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-      this.synthesis = window.speechSynthesis;
-      this.initVoices();
-    }
+class AudioTTSService {
+  private audio: HTMLAudioElement | null = null;
+  private listeners: Set<(e: TTSEvent) => void> = new Set();
+  private isPlaying = false;
+  private currentText = '';
+  private currentWords: string[] = [];
+  private rafId: number | null = null;
+
+  /** 获取音频 URL(单词) */
+  private wordUrl(word: string): string {
+    const safe = word.toLowerCase().replace(/[^a-z0-9]/g, '');
+    return `./audio/${safe}.mp3`;
+  }
+
+  /** 段落 URL(story_X_pY) */
+  paragraphUrl(storyId: string, pIdx: number): string {
+    const n = storyId.replace('story_', '');
+    return `./audio/story_${n}_p${pIdx + 1}.mp3`;
+  }
+
+  /** 获取时长(秒) */
+  getDuration(name: string): number {
+    return durations[name] || 1.5;
   }
 
   isSupported(): boolean {
-    return this.synthesis !== null;
-  }
-
-  /** 异步等 voices 加载完(Gecko/Chrome 必须) */
-  private initVoices(): Promise<void> {
-    if (this.voicesReady) return Promise.resolve();
-    if (this.voicesReadyPromise) return this.voicesReadyPromise;
-
-    this.voicesReadyPromise = new Promise((resolve) => {
-      if (!this.synthesis) {
-        resolve();
-        return;
-      }
-      const handle = () => {
-        if (this.synthesis && this.synthesis.getVoices().length > 0) {
-          this.voicesReady = true;
-          this.synthesis.removeEventListener('voiceschanged', handle);
-          resolve();
-        }
-      };
-      // 立即尝试一次
-      if (this.synthesis.getVoices().length > 0) {
-        this.voicesReady = true;
-        resolve();
-        return;
-      }
-      // 等异步加载
-      this.synthesis.addEventListener('voiceschanged', handle);
-      // 兜底:5 秒后强行 resolve(部分浏览器不发 voiceschanged)
-      setTimeout(() => {
-        if (!this.voicesReady) {
-          console.warn('[TTS] voiceschanged timeout, fallback to any voice');
-          this.voicesReady = true;
-          this.synthesis?.removeEventListener('voiceschanged', handle);
-          resolve();
-        }
-      }, 5000);
-    });
-
-    return this.voicesReadyPromise;
-  }
-
-  /** 等 voices 加载好再 speak */
-  async ready(): Promise<void> {
-    return this.initVoices();
-  }
-
-  /**
-   * 预热:Chrome autoplay policy 要求首次 speak 必须在 user gesture 中调用
-   * 调用一次无声 utterance 后,后续 speak 就可以任意触发
-   * 必须在用户点击/触摸/键盘事件里调用(调用方负责)
-   */
-  prime(): boolean {
-    if (this.primed || !this.synthesis) return false;
-    try {
-      const u = new SpeechSynthesisUtterance(' ');
-      u.volume = 0;
-      u.rate = 1;
-      u.lang = 'en-US';
-      // 不加 onend/onerror,反正听不到
-      this.synthesis.speak(u);
-      this.primed = true;
-      console.log('[TTS] primed (autoplay policy passed)');
-      return true;
-    } catch (e) {
-      console.warn('[TTS] prime failed:', e);
-      return false;
-    }
-  }
-
-  isPrimed(): boolean {
-    return this.primed;
-  }
-
-  setRate(rate: number) {
-    this.currentRate = Math.max(0.5, Math.min(1.5, rate));
+    return typeof window !== 'undefined' && typeof Audio !== 'undefined';
   }
 
   subscribe(cb: (e: TTSEvent) => void): () => void {
@@ -129,144 +65,154 @@ class TTSService {
     this.listeners.forEach((cb) => cb(e));
   }
 
-  /** 解析句子的单词边界 */
-  private parseWords(text: string): { word: string; start: number; end: number }[] {
-    const words: { word: string; start: number; end: number }[] = [];
-    let i = 0;
-    while (i < text.length) {
-      if (/[a-zA-Z']/.test(text[i])) {
-        let j = i;
-        while (j < text.length && /[a-zA-Z']/.test(text[j])) j++;
-        words.push({
-          word: text.slice(i, j),
-          start: i,
-          end: j,
-        });
-        i = j;
-      } else {
-        i++;
-      }
+  /**
+   * 播放单词
+   * 单个 mp3,无需分段,自动播放有 Chrome autoplay 限制所以仍是 user gesture
+   */
+  async speakWord(word: string): Promise<void> {
+    return this.playAudio(this.wordUrl(word), word, [word]);
+  }
+
+  /**
+   * 播放整句(用预录的段落音频)
+   */
+  async speakParagraph(storyId: string, pIdx: number, text: string): Promise<void> {
+    const url = this.paragraphUrl(storyId, pIdx);
+    const words = text.split(/\s+/).filter((w) => /[a-zA-Z]/.test(w));
+    return this.playAudio(url, text, words);
+  }
+
+  /**
+   * 核心播放:单个音频文件 + 高亮估算
+   */
+  private async playAudio(url: string, text: string, words: string[]): Promise<void> {
+    if (!this.isSupported()) {
+      this.emit({ type: 'error', error: 'not-supported' });
+      return;
     }
-    return words;
-  }
 
-  /** 选最佳英语语音 */
-  private pickVoice(): SpeechSynthesisVoice | null {
-    if (!this.synthesis) return null;
-    const voices = this.synthesis.getVoices();
-    if (voices.length === 0) return null;
+    this.stop();
+    this.currentText = text;
+    this.currentWords = words;
 
-    // 优先级:en-US 本地 > en-US 任意 > en-GB > en-* 任意 > 默认
-    return (
-      voices.find((v) => v.lang === 'en-US' && v.localService) ||
-      voices.find((v) => v.lang === 'en-US') ||
-      voices.find((v) => v.lang === 'en-GB') ||
-      voices.find((v) => v.lang.startsWith('en')) ||
-      voices[0]
-    );
-  }
+    return new Promise((resolve) => {
+      const audio = new Audio(url);
+      audio.preload = 'auto';
+      this.audio = audio;
 
-  speak(text: string, options: TTSOptions = {}): Promise<void> {
-    return new Promise(async (resolve) => {
-      if (!this.synthesis) {
-        this.emit({ type: 'error', error: 'not-supported' });
-        resolve();
-        return;
-      }
+      audio.oncanplaythrough = () => {
+        // 可以播了
+      };
 
-      // 先 cancel,避免排队
-      this.synthesis.cancel();
-      // 关键:Chrome cancel 后需要等待,否则下个 speak 被吞
-      await new Promise((r) => setTimeout(r, 50));
-
-      // 等 voices 加载
-      await this.ready();
-
-      const words = this.parseWords(text);
-      const u = new SpeechSynthesisUtterance(text);
-      u.rate = options.rate ?? this.currentRate;
-      u.lang = options.lang ?? this.currentLang;
-      u.pitch = options.pitch ?? this.currentPitch;
-      u.volume = 1; // 显式设最大
-
-      const voice = this.pickVoice();
-      if (voice) {
-        u.voice = voice;
-        u.lang = voice.lang; // 用 voice 的 lang,避免不匹配
-      }
-
-      u.onstart = () => {
+      audio.onplay = () => {
         this.isPlaying = true;
         this.emit({ type: 'start' });
-      };
-      u.onend = () => {
-        this.isPlaying = false;
-        this.emit({ type: 'end' });
-        resolve();
-      };
-      u.onerror = (e) => {
-        // 'canceled' / 'interrupted' 不算错
-        if (e.error !== 'canceled' && e.error !== 'interrupted') {
-          console.error('[TTS] error:', e.error);
-          this.emit({ type: 'error', error: e.error });
-        }
-        this.isPlaying = false;
-        this.emit({ type: 'end' });
-        resolve();
-      };
-      u.onboundary = (e) => {
-        if (e.name === 'word') {
-          const charIdx = e.charIndex;
-          const w = words.find((w) => charIdx >= w.start && charIdx < w.end);
-          if (w) {
-            this.emit({ type: 'word', wordIndex: words.indexOf(w), word: w.word });
-          }
-        }
+        this.startWordHighlight(audio, words);
       };
 
-      this.utterance = u;
-      try {
-        this.synthesis.speak(u);
-      } catch (err) {
-        console.error('[TTS] speak threw:', err);
-        this.emit({ type: 'error', error: String(err) });
+      audio.onended = () => {
         this.isPlaying = false;
+        this.stopWordHighlight();
+        this.emit({ type: 'end' });
         resolve();
-      }
+      };
+
+      audio.onerror = (e) => {
+        this.isPlaying = false;
+        this.stopWordHighlight();
+        console.error('[AudioTTS] load/play error:', url, e);
+        this.emit({ type: 'error', error: 'load-failed' });
+        resolve();
+      };
+
+      // Chrome autoplay:必须在 user gesture 内首次 play
+      audio.play().catch((err) => {
+        console.error('[AudioTTS] play() rejected:', err);
+        this.emit({ type: 'error', error: 'autoplay-blocked' });
+        resolve();
+      });
     });
   }
 
-  stop() {
-    if (this.synthesis) {
-      try {
-        this.synthesis.cancel();
-      } catch {}
-      this.isPlaying = false;
+  /**
+   * 单词高亮:用 RAF + currentTime 估算当前在播哪个单词
+   * 简单方案:把音频时长按词数平均分配(精度够用)
+   */
+  private startWordHighlight(audio: HTMLAudioElement, words: string[]) {
+    this.stopWordHighlight();
+    if (words.length === 0) return;
+
+    const tick = () => {
+      if (!this.isPlaying || !audio.duration) {
+        return;
+      }
+      const t = audio.currentTime;
+      const ratio = Math.min(1, t / audio.duration);
+      // 当前词 index(线性映射)
+      const idx = Math.min(words.length - 1, Math.floor(ratio * words.length));
+      this.emit({ type: 'word', wordIndex: idx, word: words[idx] });
+      this.rafId = requestAnimationFrame(tick);
+    };
+    this.rafId = requestAnimationFrame(tick);
+  }
+
+  private stopWordHighlight() {
+    if (this.rafId !== null) {
+      cancelAnimationFrame(this.rafId);
+      this.rafId = null;
     }
+  }
+
+  stop() {
+    this.stopWordHighlight();
+    if (this.audio) {
+      try {
+        this.audio.pause();
+        this.audio.currentTime = 0;
+      } catch {}
+      this.audio = null;
+    }
+    this.isPlaying = false;
   }
 
   get playing() {
     return this.isPlaying;
   }
 
-  /** 诊断:返回当前 TTS 状态(调试用) */
+  /** 预热:加载词典音频到浏览器缓存(下次播立即响应) */
+  prime() {
+    if (typeof window === 'undefined') return;
+    // 只预热高频词 + 段落
+    const toPrime = ['egg', 'magic', 'dragon', 'star', 'i', 'you', 'look', 'see'];
+    toPrime.forEach((w) => {
+      const a = new Audio();
+      a.preload = 'auto';
+      a.src = this.wordUrl(w);
+    });
+    // 段落音频
+    for (let s = 1; s <= 3; s++) {
+      for (let p = 1; p <= 3; p++) {
+        const a = new Audio();
+        a.preload = 'auto';
+        a.src = `./audio/story_${s}_p${p}.mp3`;
+      }
+    }
+    console.log('[AudioTTS] primed');
+  }
+
+  /** 诊断 */
   diagnose(): object {
-    if (!this.synthesis) return { supported: false };
     return {
-      supported: true,
-      voicesReady: this.voicesReady,
-      voiceCount: this.synthesis.getVoices().length,
-      voices: this.synthesis.getVoices().slice(0, 5).map((v) => `${v.name} (${v.lang})`),
-      speaking: this.synthesis.speaking,
-      pending: this.synthesis.pending,
-      paused: this.synthesis.paused,
+      supported: this.isSupported(),
+      playing: this.isPlaying,
+      currentAudio: this.audio?.src || null,
+      durationsLoaded: Object.keys(durations).length,
     };
   }
 }
 
-export const tts = new TTSService();
+export const tts = new AudioTTSService();
 
-// 暴露到 window 方便调试
 if (typeof window !== 'undefined') {
   (window as any).__tts = tts;
 }

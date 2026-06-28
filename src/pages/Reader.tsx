@@ -33,6 +33,8 @@ export function Reader() {
         setActiveWord(e.wordIndex);
       }
     });
+    // 预热:首次进入页面加载音频
+    tts.prime();
     return () => {
       unsubRef.current?.();
       tts.stop();
@@ -58,18 +60,15 @@ export function Reader() {
 
   const playTTS = useCallback(async () => {
     if (!tts.isSupported()) {
-      alert('当前浏览器不支持语音朗读 😅\n\n推荐用 Chrome / Edge / Safari 最新版');
+      alert('当前浏览器不支持语音播放 😅');
       return;
     }
-    // 先确保 voices 加载好(Chrome 异步)
-    await tts.ready();
-    console.log('[TTS] diagnose:', tts.diagnose());
     try {
-      await tts.speak(paragraph.en);
+      await tts.speakParagraph(storyId, pIdx, paragraph.en);
     } catch (e) {
-      console.error('[TTS] speak failed:', e);
+      console.error('[TTS] play failed:', e);
     }
-  }, [paragraph.en]);
+  }, [storyId, pIdx, paragraph.en]);
 
   function next() {
     tts.stop();
@@ -139,7 +138,12 @@ export function Reader() {
 
         {/* 跟读 */}
         <div className="mb-4">
-          <Recorder text={paragraph.en} onPlayTTS={playTTS} ttsPlaying={ttsPlaying} />
+          <Recorder
+            key={`rec-${storyId}-${pIdx}`}
+            text={paragraph.en}
+            onPlayTTS={playTTS}
+            ttsPlaying={ttsPlaying}
+          />
         </div>
 
         {/* 翻页 */}
@@ -175,7 +179,7 @@ export function Reader() {
           entry={dict}
           onClose={() => setDict(null)}
           onPlay={() => {
-            tts.speak(dict.word);
+            tts.speakWord(dict.word);
           }}
         />
       )}

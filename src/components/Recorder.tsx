@@ -2,7 +2,7 @@
  * 录音跟读组件
  * 录 → 回放(对比)→ 重新录
  */
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { recorder } from '../services/recorder';
 import { playClick } from '../utils/audio';
 
@@ -17,9 +17,42 @@ export function Recorder({ text, onPlayTTS, ttsPlaying }: Props) {
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const urlRef = useRef<string | null>(null); // 记录最新 URL,卸载时释放
+
+  // 切换段落(text 变化)时重置状态 + 释放上一个 blob URL
+  useEffect(() => {
+    // 卸载当前 audio
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.src = '';
+      audioRef.current = null;
+    }
+    // 释放上一个 blob URL
+    if (urlRef.current) {
+      URL.revokeObjectURL(urlRef.current);
+      urlRef.current = null;
+    }
+    setAudioUrl(null);
+    setError(null);
+    setRecording(false);
+  }, [text]);
+
+  // 组件卸载时彻底清理
+  useEffect(() => {
+    return () => {
+      if (urlRef.current) {
+        URL.revokeObjectURL(urlRef.current);
+      }
+    };
+  }, []);
 
   async function startRec() {
     setError(null);
+    // 开始新录音前清掉旧的
+    if (urlRef.current) {
+      URL.revokeObjectURL(urlRef.current);
+      urlRef.current = null;
+    }
     setAudioUrl(null);
     try {
       await recorder.start();
@@ -33,7 +66,10 @@ export function Recorder({ text, onPlayTTS, ttsPlaying }: Props) {
   async function stopRec() {
     try {
       const blob = await recorder.stop();
+      // 释放上一个
+      if (urlRef.current) URL.revokeObjectURL(urlRef.current);
       const url = URL.createObjectURL(blob);
+      urlRef.current = url;
       setAudioUrl(url);
       setRecording(false);
     } catch (e: any) {

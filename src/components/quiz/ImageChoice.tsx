@@ -27,10 +27,6 @@ export function ImageChoice({ item, onAnswer }: Props) {
     const timer = setTimeout(() => {
       if (tts.isSupported() && !playedRef.current) {
         playedRef.current = true;
-        // 如果还没 primed,只在 console 提醒(用户点选项时才 prime)
-        if (!tts.isPrimed()) {
-          console.log('[ImageChoice] waiting for first user gesture to prime TTS');
-        }
         playAnswer();
       }
     }, 500);
@@ -40,13 +36,12 @@ export function ImageChoice({ item, onAnswer }: Props) {
 
   async function playAnswer() {
     if (!tts.isSupported()) {
-      alert('当前浏览器不支持语音朗读 😅\n\n推荐用 Chrome / Edge / Safari 最新版');
+      alert('当前浏览器不支持语音播放 😅');
       return;
     }
     setPlaying(true);
-    await tts.ready();
     try {
-      await tts.speak(item.answer);
+      await tts.speakWord(item.answer);
     } finally {
       setPlaying(false);
     }
