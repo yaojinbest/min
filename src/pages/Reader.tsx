@@ -56,8 +56,19 @@ export function Reader() {
   const paragraph = story.paragraphs[pIdx];
   const isLast = pIdx === story.paragraphs.length - 1;
 
-  const playTTS = useCallback(() => {
-    tts.speak(paragraph.en);
+  const playTTS = useCallback(async () => {
+    if (!tts.isSupported()) {
+      alert('当前浏览器不支持语音朗读 😅\n\n推荐用 Chrome / Edge / Safari 最新版');
+      return;
+    }
+    // 先确保 voices 加载好(Chrome 异步)
+    await tts.ready();
+    console.log('[TTS] diagnose:', tts.diagnose());
+    try {
+      await tts.speak(paragraph.en);
+    } catch (e) {
+      console.error('[TTS] speak failed:', e);
+    }
   }, [paragraph.en]);
 
   function next() {
@@ -143,6 +154,18 @@ export function Reader() {
 
         <div className="mt-4 text-center text-xs text-gray-400">
           💡 点击单词可以查词
+        </div>
+
+        {/* 调试用诊断按钮(隐藏,长按底部署名触发) */}
+        <div
+          className="mt-8 text-center text-xs text-gray-300 cursor-help select-none"
+          onDoubleClick={() => {
+            console.log('[TTS] diagnose:', tts.diagnose());
+            alert(JSON.stringify(tts.diagnose(), null, 2));
+          }}
+          title="双击查看 TTS 诊断"
+        >
+          ·
         </div>
       </div>
 
