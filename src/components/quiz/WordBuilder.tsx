@@ -152,7 +152,11 @@ export function WordBuilder({ item, onAnswer }: Props) {
 
       {showResult && !isCorrect && (
         <div className="mt-4 text-center text-green-600 font-semibold">
-          正确答案:<span className="text-2xl ml-2">{item.answer}</span>
+          正确拼法:
+          <span className="text-3xl ml-2 font-bold text-magic-600">{item.answer}</span>
+          <div className="text-sm text-gray-500 mt-1">
+            (听一听按钮可以再听一次发音)
+          </div>
         </div>
       )}
     </div>
