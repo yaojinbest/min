@@ -1,7 +1,7 @@
 /**
  * 图选题:4 个 emoji 选项,选对应单词
  */
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import type { QuizItem } from '../../data/stories';
 
 interface Props {
@@ -12,6 +12,12 @@ interface Props {
 export function ImageChoice({ item, onAnswer }: Props) {
   const [picked, setPicked] = useState<string | null>(null);
   const [showResult, setShowResult] = useState(false);
+
+  // 切换题目时重置状态
+  useEffect(() => {
+    setPicked(null);
+    setShowResult(false);
+  }, [item.id]);
 
   function pick(value: string) {
     if (showResult) return;

@@ -32,25 +32,29 @@ export function Quiz() {
   function handleAnswer(correct: boolean) {
     if (correct) {
       playSuccess();
-      setCorrectCount((c) => c + 1);
     } else {
       playError();
     }
 
+    // 用函数式 setState 避免闭包陷阱
+    setCorrectCount((prev) => {
+      const newCount = correct ? prev + 1 : prev;
+      // 最后一题 -> 提交
+      if (qIdx === total - 1) {
+        // 在 setState 回调里侧车里完成副作用
+        setTimeout(() => {
+          completeStory(story!.id, newCount);
+          const idx = ['story_1', 'story_2', 'story_3'].indexOf(story!.id);
+          const next = ['story_1', 'story_2', 'story_3'][idx + 1];
+          if (next) unlockStory(next);
+          setDone(true);
+        }, 50);
+      }
+      return newCount;
+    });
+
     if (qIdx < total - 1) {
       setTimeout(() => setQIdx((i) => i + 1), 1300);
-    } else {
-      setTimeout(() => {
-        const final = correctCount + (correct ? 1 : 0);
-        setCorrectCount(final);
-        // 星数 = 答对题数
-        completeStory(story!.id, final);
-        // 解锁下一关
-        const idx = ['story_1', 'story_2', 'story_3'].indexOf(story!.id);
-        const next = ['story_1', 'story_2', 'story_3'][idx + 1];
-        if (next) unlockStory(next);
-        setDone(true);
-      }, 1300);
     }
   }
 
@@ -105,8 +109,8 @@ export function Quiz() {
           />
         </div>
 
-        {/* 题目 */}
-        <div className="card">
+        {/* 题目 - key 强制重建子组件,避免状态错位 */}
+        <div className="card" key={`${storyId}-${qIdx}`}>
           {item.type === 'image_choice' ? (
             <ImageChoice item={item} onAnswer={handleAnswer} />
           ) : (

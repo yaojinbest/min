@@ -1,7 +1,7 @@
 /**
  * 拼词题:点击字母顺序拼单词
  */
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import type { QuizItem } from '../../data/stories';
 
 interface Props {
@@ -15,6 +15,13 @@ export function WordBuilder({ item, onAnswer }: Props) {
     item.scrambled.map((_, i) => i).sort(() => Math.random() - 0.5),
   );
   const [showResult, setShowResult] = useState(false);
+
+  // 切换题目时重置状态 + 重洗字母池
+  useEffect(() => {
+    setPicked([]);
+    setPool(item.scrambled.map((_, i) => i).sort(() => Math.random() - 0.5));
+    setShowResult(false);
+  }, [item.id]);
 
   const built = picked.map((i) => item.scrambled[i]).join('');
 
