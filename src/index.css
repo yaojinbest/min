@@ -1,0 +1,52 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html, body, #root {
+    height: 100%;
+  }
+  body {
+    @apply bg-gradient-to-br from-magic-50 via-pink-50 to-sky-50;
+    @apply font-kid;
+    -webkit-tap-highlight-color: transparent;
+    user-select: none;
+  }
+}
+
+@layer components {
+  .btn-magic {
+    @apply px-6 py-3 rounded-2xl bg-gradient-to-r from-magic-500 to-pink-500
+           text-white font-bold text-lg shadow-lg
+           active:scale-95 transition-all
+           hover:shadow-xl hover:from-magic-600 hover:to-pink-600;
+  }
+  .btn-ghost {
+    @apply px-4 py-2 rounded-xl bg-white/80 backdrop-blur
+           text-magic-700 font-semibold shadow
+           active:scale-95 transition-all;
+  }
+  .card {
+    @apply bg-white/90 backdrop-blur rounded-3xl shadow-xl p-6;
+  }
+}
+
+/* 单词高亮动画 */
+@keyframes pulse-word {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.15); color: #a855f7; }
+}
+.word-active {
+  animation: pulse-word 0.5s ease-in-out infinite;
+  color: #a855f7;
+  font-weight: 700;
+}
+.word-correct {
+  color: #10b981;
+  font-weight: 600;
+}
+.word-wrong {
+  color: #ef4444;
+  text-decoration: line-through;
+  text-decoration-color: #ef4444;
+}
