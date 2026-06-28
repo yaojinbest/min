@@ -32,6 +32,7 @@ class TTSService {
   private currentPitch = 1.1;
   private voicesReady = false;
   private voicesReadyPromise: Promise<void> | null = null;
+  private primed = false; // 是否预热过(用于 Chrome autoplay policy)
 
   constructor() {
     if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
@@ -86,6 +87,33 @@ class TTSService {
   /** 等 voices 加载好再 speak */
   async ready(): Promise<void> {
     return this.initVoices();
+  }
+
+  /**
+   * 预热:Chrome autoplay policy 要求首次 speak 必须在 user gesture 中调用
+   * 调用一次无声 utterance 后,后续 speak 就可以任意触发
+   * 必须在用户点击/触摸/键盘事件里调用(调用方负责)
+   */
+  prime(): boolean {
+    if (this.primed || !this.synthesis) return false;
+    try {
+      const u = new SpeechSynthesisUtterance(' ');
+      u.volume = 0;
+      u.rate = 1;
+      u.lang = 'en-US';
+      // 不加 onend/onerror,反正听不到
+      this.synthesis.speak(u);
+      this.primed = true;
+      console.log('[TTS] primed (autoplay policy passed)');
+      return true;
+    } catch (e) {
+      console.warn('[TTS] prime failed:', e);
+      return false;
+    }
+  }
+
+  isPrimed(): boolean {
+    return this.primed;
   }
 
   setRate(rate: number) {

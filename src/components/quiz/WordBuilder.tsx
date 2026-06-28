@@ -26,13 +26,16 @@ export function WordBuilder({ item, onAnswer }: Props) {
     setShowResult(false);
     playedRef.current = false;
 
-    // 等 400ms 自动播单词
+    // 等 500ms 自动播单词
     const timer = setTimeout(() => {
       if (tts.isSupported() && !playedRef.current) {
         playedRef.current = true;
+        if (!tts.isPrimed()) {
+          console.log('[WordBuilder] waiting for first user gesture to prime TTS');
+        }
         playAnswer();
       }
-    }, 400);
+    }, 500);
 
     return () => clearTimeout(timer);
   }, [item.id]);

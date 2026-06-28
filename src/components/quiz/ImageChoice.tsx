@@ -23,13 +23,17 @@ export function ImageChoice({ item, onAnswer }: Props) {
     setShowResult(false);
     playedRef.current = false;
 
-    // 等 400ms 再播,让用户先看清题目
+    // 等 500ms 再播,让用户先看清题目
     const timer = setTimeout(() => {
       if (tts.isSupported() && !playedRef.current) {
         playedRef.current = true;
+        // 如果还没 primed,只在 console 提醒(用户点选项时才 prime)
+        if (!tts.isPrimed()) {
+          console.log('[ImageChoice] waiting for first user gesture to prime TTS');
+        }
         playAnswer();
       }
-    }, 400);
+    }, 500);
 
     return () => clearTimeout(timer);
   }, [item.id]);
