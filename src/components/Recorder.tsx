@@ -87,8 +87,10 @@ export function Recorder({ text, onPlayTTS, ttsPlaying }: Props) {
 
   return (
     <div className="card">
-      <div className="text-sm text-gray-500 mb-2 text-center">🎙️ 跟读练习</div>
-      <div className="text-center text-lg mb-4 italic text-magic-700">"{text}"</div>
+      <div className="text-sm text-gray-500 mb-2 text-center">🎙️ 跟读练习 (v0.2.0)</div>
+      <div className="text-center text-lg mb-4 italic text-magic-700" data-testid="recorder-text">
+        "{text}"
+      </div>
 
       <div className="flex flex-wrap gap-2 justify-center">
         <button

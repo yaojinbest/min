@@ -1,7 +1,7 @@
 {
   "name": "min",
   "private": true,
-  "version": "0.1.4",
+  "version": "0.2.0",
   "type": "module",
   "description": "Magic English MVP - 6-12 岁儿童英语学习",
   "scripts": {
