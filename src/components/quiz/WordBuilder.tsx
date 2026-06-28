@@ -1,8 +1,9 @@
 /**
  * 拼词题:点击字母顺序拼单词
  */
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import type { QuizItem } from '../../data/stories';
+import { tts } from '../../services/tts';
 
 interface Props {
   item: QuizItem;
@@ -15,13 +16,40 @@ export function WordBuilder({ item, onAnswer }: Props) {
     item.scrambled.map((_, i) => i).sort(() => Math.random() - 0.5),
   );
   const [showResult, setShowResult] = useState(false);
+  const [playing, setPlaying] = useState(false);
+  const playedRef = useRef(false);
 
-  // 切换题目时重置状态 + 重洗字母池
+  // 切换题目时重置状态 + 重洗字母池 + 自动播一次
   useEffect(() => {
     setPicked([]);
     setPool(item.scrambled.map((_, i) => i).sort(() => Math.random() - 0.5));
     setShowResult(false);
+    playedRef.current = false;
+
+    // 等 400ms 自动播单词
+    const timer = setTimeout(() => {
+      if (tts.isSupported() && !playedRef.current) {
+        playedRef.current = true;
+        playAnswer();
+      }
+    }, 400);
+
+    return () => clearTimeout(timer);
   }, [item.id]);
+
+  async function playAnswer() {
+    if (!tts.isSupported()) {
+      alert('当前浏览器不支持语音朗读 😅\n\n推荐用 Chrome / Edge / Safari 最新版');
+      return;
+    }
+    setPlaying(true);
+    await tts.ready();
+    try {
+      await tts.speak(item.answer);
+    } finally {
+      setPlaying(false);
+    }
+  }
 
   const built = picked.map((i) => item.scrambled[i]).join('');
 
@@ -56,9 +84,26 @@ export function WordBuilder({ item, onAnswer }: Props) {
 
   return (
     <div>
-      <h3 className="text-xl font-bold text-center mb-6 text-magic-700">
+      <h3 className="text-xl font-bold text-center mb-4 text-magic-700">
         {item.question}
       </h3>
+
+      {/* 🔊 听一听按钮 — 拼词前先听 */}
+      <div className="flex justify-center mb-4">
+        <button
+          onClick={playAnswer}
+          disabled={playing}
+          className={[
+            'px-6 py-3 rounded-2xl font-bold shadow',
+            'flex items-center gap-2 transition-all',
+            'bg-gradient-to-r from-magic-500 to-pink-500 text-white',
+            playing ? 'animate-pulse scale-95' : 'hover:scale-105 active:scale-95',
+          ].join(' ')}
+        >
+          <span className="text-2xl">🔊</span>
+          <span>{playing ? '播放中...' : '听一听单词'}</span>
+        </button>
+      </div>
 
       {/* 已选字母 */}
       <div className="flex justify-center gap-2 mb-6 min-h-[60px] items-center">
