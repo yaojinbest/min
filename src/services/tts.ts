@@ -135,8 +135,42 @@ class AudioTTSService {
   }
 
   /**
-   * 单词高亮:用 RAF + currentTime 估算当前在播哪个单词
-   * 简单方案:把音频时长按词数平均分配(精度够用)
+   * 单词高亮:按音节权重计算每个词的时间区间,实时高亮
+   * 原理:单词发音时长 ∝ 音节数。多个单词的相对时长加起来 = 100%
+   * - 单音节词: 0.8 (I, a, is, am)
+   * - 双音节词: 1.5 (magic, dragon, happy)
+   * - 三音节词+: 2.2
+   */
+  private getWordWeights(words: string[]): number[] {
+    return words.map((w) => {
+      const clean = w.toLowerCase().replace(/[^a-z]/g, '');
+      // 元音组数 = 音节数(粗估)
+      const syllables = (clean.match(/[aeiouy]+/g) || ['a']).length;
+      // 长词加点权重
+      const len = clean.length;
+      const weight = syllables * 0.7 + (len > 5 ? 0.3 : 0);
+      return Math.max(0.6, weight);
+    });
+  }
+
+  /**
+   * 计算每个词的累计时间点(秒)
+   * 返回数组:boundaries[i] = 词 i 的开始时间
+   */
+  private computeBoundaries(words: string[], duration: number): number[] {
+    const weights = this.getWordWeights(words);
+    const total = weights.reduce((s, w) => s + w, 0);
+    const boundaries: number[] = [0];
+    let acc = 0;
+    for (let i = 0; i < weights.length - 1; i++) {
+      acc += weights[i];
+      boundaries.push((acc / total) * duration);
+    }
+    return boundaries;
+  }
+
+  /**
+   * 单词高亮:基于音节权重 + audio.currentTime 精确跟踪
    */
   private startWordHighlight(audio: HTMLAudioElement, words: string[]) {
     this.stopWordHighlight();
@@ -147,9 +181,24 @@ class AudioTTSService {
         return;
       }
       const t = audio.currentTime;
-      const ratio = Math.min(1, t / audio.duration);
-      // 当前词 index(线性映射)
-      const idx = Math.min(words.length - 1, Math.floor(ratio * words.length));
+      const dur = audio.duration;
+
+      // 方案 1: 只有一个词,不计算高亮
+      if (words.length === 1) {
+        this.emit({ type: 'word', wordIndex: 0, word: words[0] });
+        this.rafId = requestAnimationFrame(tick);
+        return;
+      }
+
+      // 方案 2: 多个词,按音节权重算当前词
+      const boundaries = this.computeBoundaries(words, dur);
+      let idx = 0;
+      for (let i = boundaries.length - 1; i >= 0; i--) {
+        if (t >= boundaries[i]) {
+          idx = i;
+          break;
+        }
+      }
       this.emit({ type: 'word', wordIndex: idx, word: words[idx] });
       this.rafId = requestAnimationFrame(tick);
     };
