@@ -32,6 +32,10 @@ export function Recorder({ text, onPlayTTS, ttsPlaying }: Props) {
       URL.revokeObjectURL(urlRef.current);
       urlRef.current = null;
     }
+    // 如果正在录音,强制停止(防止泄漏到下一段)
+    if (recorder.recording) {
+      recorder.stop().catch(() => {});
+    }
     setAudioUrl(null);
     setError(null);
     setRecording(false);
